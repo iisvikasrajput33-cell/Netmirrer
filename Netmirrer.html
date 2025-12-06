@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StreamFlix - 3D Cinema Experience</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- HLS.js for Live TV Playback -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: #0a0a0a;
+            color: #e5e5e5;
+            overflow-x: hidden;
+            perspective: 1000px;
+        }
+
+        /* Scrollbar Styling */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #0a0a0a; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #555; }
+        
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        /* 3D Card Animation */
+        .movie-card-container {
+            perspective: 1000px;
+        }
+        .movie-card {
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            transform-style: preserve-3d;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+        .movie-card:hover {
+            transform: translateY(-10px) scale(1.05) rotateX(2deg);
+            box-shadow: 0 20px 30px rgba(0,0,0,0.5);
+            z-index: 50;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        /* Hero Gradients */
+        .hero-overlay { background: linear-gradient(to top, #0a0a0a 10%, transparent 100%); }
+        .hero-overlay-left { background: linear-gradient(to right, #0a0a0a 20%, transparent 100%); }
+        
+        /* Text Glow */
+        .text-glow { text-shadow: 0 0 20px rgba(59, 130, 246, 0.5); }
+
+        /* Loader */
+        .loader {
+            border: 3px solid rgba(255,255,255,0.1); border-top: 3px solid #3b82f6;
+            border-radius: 50%; width: 40px; height: 40px;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Chips */
+        .category-chip {
+            white-space: nowrap;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 8px 20px;
+            border-radius: 50px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: 1px solid rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+        }
+        .category-chip:hover, .category-chip.active {
+            background: #3b82f6;
+            color: white;
+            border-color: #3b82f6;
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.4);
+        }
+
+        /* Nav Link */
+        .nav-link { position: relative; }
+        .nav-link::after {
+            content: ''; position: absolute; bottom: -4px; left: 0; width: 0; height: 2px;
+            background: #3b82f6; transition: width 0.3s;
+        }
+        .nav-link:hover::after, .nav-link.active::after { width: 100%; }
+        .nav-link.active { color: #fff; text-shadow: 0 0 10px rgba(59, 130, 246, 0.5); }
+        
+        /* Channel Logo Fit */
+        .channel-logo {
+            object-fit: contain;
+            background: rgba(255,255,255,0.9);
+            padding: 10px;
+        }
+
+        /* Live TV Modal Scrollbar */
+        .custom-scroller::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scroller::-webkit-scrollbar-thumb {
+            background-color: #333;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Navbar -->
+    <nav class="fixed top-0 w-full z-50 bg-black/80 backdrop-blur-md border-b border-white/5 p-4 flex items-center justify-between transition-all duration-300">
+        <div class="flex items-center gap-8">
+            <h1 class="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-600 cursor-pointer tracking-tighter" onclick="switchPage('home')">STREAMFLIX <span class="text-xs text-white bg-blue-600 px-1 rounded ml-1 align-top">3D</span></h1>
+            <div class="hidden lg:flex gap-8 text-gray-400 text-sm font-semibold uppercase tracking-wide">
+                <a onclick="switchPage('home')" class="nav-link cursor-pointer hover:text-white transition" id="nav-home">Home</a>
+                <a onclick="switchPage('live')" class="nav-link cursor-pointer hover:text-white transition text-red-500" id="nav-live"><i class="fa-solid fa-satellite-dish mr-1"></i> Live TV</a>
+                <a onclick="switchPage('movies')" class="nav-link cursor-pointer hover:text-white transition" id="nav-movies">Movies</a>
+                <a onclick="switchPage('series')" class="nav-link cursor-pointer hover:text-white transition" id="nav-series">Series</a>
+                <a onclick="switchPage('upcoming')" class="nav-link cursor-pointer hover:text-white transition" id="nav-upcoming">Upcoming</a>
+            </div>
+        </div>
+        
+        <div class="flex items-center gap-5">
+            <select id="globalLang" onchange="updateGlobalLang(this.value)" class="bg-gray-900 border border-gray-700 text-xs rounded px-2 py-1 text-gray-300 focus:outline-none focus:border-blue-500 hidden md:block">
+                <option value="en">English UI</option>
+                <option value="hi">Hindi UI</option>
+            </select>
+
+            <div class="relative hidden md:block group">
+                <input type="text" id="searchInput" placeholder="Find movies, channels..." 
+                    class="bg-gray-900/80 border border-gray-700 text-sm rounded-full px-5 py-2 w-64 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white transition-all group-hover:w-72">
+                <i class="fa-solid fa-magnifying-glass absolute right-4 top-2.5 text-gray-400"></i>
+            </div>
+            <i class="fa-solid fa-magnifying-glass md:hidden text-xl cursor-pointer text-white" onclick="document.getElementById('mobileSearch').classList.toggle('hidden')"></i>
+            <button onclick="openSettings()" class="text-gray-300 hover:text-white hover:rotate-90 transition duration-300"><i class="fa-solid fa-gear text-xl"></i></button>
+        </div>
+    </nav>
+
+    <!-- Mobile Search -->
+    <div id="mobileSearch" class="fixed top-16 left-0 w-full bg-black p-4 z-40 hidden border-b border-gray-800">
+        <input type="text" id="mobileSearchInput" placeholder="Search..." class="w-full bg-gray-800 p-3 rounded text-white focus:outline-none">
+    </div>
+
+    <!-- API Key Modal -->
+    <div id="settingsModal" class="fixed inset-0 bg-black/95 z-[60] flex items-center justify-center hidden backdrop-blur-sm">
+        <div class="bg-[#111] p-8 rounded-2xl max-w-md w-full border border-gray-800 shadow-2xl relative overflow-hidden">
+            <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-purple-500"></div>
+            <h2 class="text-2xl font-bold mb-2 text-white">Setup API</h2>
+            <p class="text-gray-400 text-sm mb-6">Enter your TMDB API Key to unlock the universe.</p>
+            <input type="text" id="apiKeyInput" placeholder="TMDB API Key" class="w-full bg-black border border-gray-700 p-3 rounded-lg mb-6 text-white focus:border-blue-500 focus:outline-none transition">
+            <div class="flex justify-end gap-3">
+                <button onclick="saveApiKey()" class="bg-blue-600 px-6 py-2 rounded-lg font-bold hover:bg-blue-700 transition shadow-lg shadow-blue-600/20">Connect</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Language Selection Modal (Before Play) -->
+    <div id="langSelectModal" class="fixed inset-0 bg-black/95 z-[70] hidden flex items-center justify-center backdrop-blur-md">
+        <div class="bg-[#111] p-8 rounded-2xl max-w-sm w-full border border-gray-800 shadow-2xl text-center">
+            <i class="fa-solid fa-language text-4xl text-blue-500 mb-4"></i>
+            <h2 class="text-2xl font-bold mb-2">Select Audio Language</h2>
+            <p class="text-gray-400 text-sm mb-6">Choose your preferred voice language for playback.</p>
+            
+            <div class="grid grid-cols-2 gap-3 mb-6">
+                <button onclick="confirmLang('hi')" class="p-3 rounded-lg border border-gray-700 hover:border-blue-500 hover:bg-blue-500/10 transition group">
+                    <span class="block font-bold text-white">Hindi</span>
+                    <span class="text-xs text-gray-500 group-hover:text-blue-300">Dubbed</span>
+                </button>
+                <button onclick="confirmLang('en')" class="p-3 rounded-lg border border-gray-700 hover:border-blue-500 hover:bg-blue-500/10 transition group">
+                    <span class="block font-bold text-white">English</span>
+                    <span class="text-xs text-gray-500 group-hover:text-blue-300">Original</span>
+                </button>
+                <button onclick="confirmLang('ta')" class="p-3 rounded-lg border border-gray-700 hover:border-blue-500 hover:bg-blue-500/10 transition group">
+                    <span class="block font-bold text-white">Tamil</span>
+                    <span class="text-xs text-gray-500 group-hover:text-blue-300">Dubbed</span>
+                </button>
+                <button onclick="confirmLang('te')" class="p-3 rounded-lg border border-gray-700 hover:border-blue-500 hover:bg-blue-500/10 transition group">
+                    <span class="block font-bold text-white">Telugu</span>
+                    <span class="text-xs text-gray-500 group-hover:text-blue-300">Dubbed</span>
+                </button>
+            </div>
+            
+            <button onclick="closeLangModal()" class="text-gray-500 hover:text-white text-sm">Cancel</button>
+        </div>
+    </div>
+
+    <!-- ============================================== -->
+    <!-- NEW YOUTUBE-STYLE LIVE TV MODAL -->
+    <!-- ============================================== -->
+    <div id="liveTvModal" class="fixed inset-0 bg-[#0f0f0f] z-[100] hidden flex flex-col">
+        <!-- Modal Header -->
+        <div class="flex justify-between items-center p-3 bg-black border-b border-gray-800">
+            <div class="flex items-center gap-3">
+                <div class="w-2 h-2 bg-red-600 rounded-full animate-pulse"></div>
+                <h2 id="livePlayerTitle" class="text-lg font-bold text-white truncate max-w-[200px] md:max-w-md">Channel Name</h2>
+            </div>
+            <button onclick="closeLiveTvModal()" class="text-gray-400 hover:text-white hover:bg-white/10 p-2 rounded-full transition">
+                <i class="fa-solid fa-xmark text-xl"></i>
+            </button>
+        </div>
+
+        <!-- Main Content (Player + Sidebar) -->
+        <div class="flex-grow flex flex-col lg:flex-row overflow-hidden">
+            
+            <!-- Video Player Area (Left/Top) -->
+            <div class="flex-grow lg:w-[75%] bg-black relative flex flex-col">
+                <div class="relative w-full h-[300px] md:h-[500px] lg:h-full bg-black flex items-center justify-center">
+                    <!-- Live Video Element -->
+                    <video id="liveMainVideo" class="w-full h-full object-contain" controls autoplay></video>
+                    
+                    <!-- Loader -->
+                    <div id="livePlayerLoader" class="absolute inset-0 flex items-center justify-center z-10 bg-black/50">
+                        <div class="loader"></div>
+                    </div>
+                    
+                    <!-- Error Message -->
+                    <div id="livePlayerError" class="absolute inset-0 flex items-center justify-center z-10 hidden bg-black/80 flex-col text-center p-4">
+                        <i class="fa-solid fa-triangle-exclamation text-yellow-500 text-3xl mb-3"></i>
+                        <p class="text-gray-300">Stream currently unavailable.</p>
+                        <p class="text-xs text-gray-500 mt-1">Try another channel from the list.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recommendations Sidebar (Right/Bottom) -->
+            <div class="lg:w-[25%] lg:min-w-[350px] bg-[#111] border-l border-gray-800 flex flex-col h-full">
+                <div class="p-4 border-b border-gray-800 bg-[#161616]">
+                    <h3 class="font-bold text-gray-200">Recommended Channels</h3>
+                </div>
+                <!-- Scrollable List -->
+                <div id="liveRecommendations" class="flex-grow overflow-y-auto custom-scroller p-2 space-y-2">
+                    <!-- Recommended Items injected via JS -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Movie/Series Modal Player (Iframe) -->
+    <div id="playerModal" class="fixed inset-0 bg-black z-[80] hidden flex flex-col">
+        <div class="flex justify-between items-center p-4 bg-[#0a0a0a] border-b border-gray-800 z-50">
+            <div class="flex items-center gap-3">
+                <h2 id="playerTitle" class="text-lg font-bold truncate max-w-md text-white">Now Playing</h2>
+                <span id="playerLangTag" class="text-xs bg-blue-600 px-2 py-0.5 rounded text-white font-bold uppercase">HD</span>
+            </div>
+            <button onclick="closePlayer()" class="text-white hover:text-red-500 font-bold px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 transition flex items-center gap-2">
+                <i class="fa-solid fa-xmark"></i> Close
+            </button>
+        </div>
+        <div class="flex-grow relative bg-black flex items-center justify-center">
+            <div id="iframeLoader" class="loader absolute z-10"></div>
+            <!-- FIXED ID: videoFrame -->
+            <iframe id="videoFrame" class="w-full h-full border-0" allowfullscreen allow="autoplay; encrypted-media"></iframe>
+        </div>
+    </div>
+
+    <!-- Main Views Container -->
+    <div id="mainContainer" class="pt-20 min-h-screen pb-20">
+
+        <!-- 1. HOME VIEW -->
+        <div id="view-home" class="page-view fade-in">
+            <header id="heroSection" class="relative h-[80vh] w-full bg-cover bg-center flex items-end pb-24 transition-all duration-1000 group">
+                <div class="absolute inset-0 bg-black/10"></div>
+                <div class="absolute inset-0 hero-overlay"></div>
+                <div class="absolute inset-0 hero-overlay-left"></div>
+                <div class="relative z-10 px-6 md:px-16 max-w-4xl fade-in pb-10" id="heroContent">
+                    <!-- Hero content injected via JS -->
+                </div>
+            </header>
+            <div id="homeRows" class="relative z-20 space-y-16 mt-8"></div>
+        </div>
+
+        <!-- 2. LIVE TV VIEW -->
+        <div id="view-live" class="page-view hidden fade-in pt-8">
+            <div class="px-6 md:px-16 mb-10">
+                <div class="flex items-center gap-4 mb-4">
+                    <span class="w-3 h-3 bg-red-500 rounded-full animate-pulse shadow-[0_0_10px_red]"></span>
+                    <h2 class="text-4xl font-extrabold text-white">Live Indian Channels</h2>
+                </div>
+                
+                <!-- Category Chips -->
+                <div class="flex gap-4 overflow-x-auto hide-scrollbar pb-4 mb-8" id="liveTags">
+                      <button class="category-chip active" onclick="filterLiveTV('All')">All Channels</button>
+                      <button class="category-chip" onclick="filterLiveTV('News')">News</button>
+                      <button class="category-chip" onclick="filterLiveTV('Entertainment')">Entertainment</button>
+                      <button class="category-chip" onclick="filterLiveTV('Movies')">Movies</button>
+                      <button class="category-chip" onclick="filterLiveTV('Music')">Music</button>
+                      <button class="category-chip" onclick="filterLiveTV('Sports')">Sports</button>
+                      <button class="category-chip" onclick="filterLiveTV('Kids')">Kids</button>
+                </div>
+
+                <!-- Top Ranking Section -->
+                <div id="topRankingSection" class="hidden mb-12">
+                    <h3 class="text-2xl font-bold mb-6 border-l-4 border-yellow-500 pl-4 text-white">Top Ranking Channels</h3>
+                    <div id="topRankingGrid" class="flex gap-5 overflow-x-auto hide-scrollbar pb-4"></div>
+                </div>
+
+                <!-- All Channels Grid -->
+                <h3 class="text-2xl font-bold mb-6 border-l-4 border-blue-600 pl-4 text-white">All Channels</h3>
+                <div id="liveGrid" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6 min-h-screen"></div>
+                <div id="liveLoader" class="text-center p-8 hidden"><div class="loader inline-block"></div></div>
+            </div>
+        </div>
+
+        <!-- 3. MOVIES VIEW -->
+        <div id="view-movies" class="page-view hidden fade-in pt-8">
+            <div class="px-6 md:px-16 mb-10">
+                <h2 class="text-4xl font-extrabold mb-3 text-white">Movies Universe</h2>
+                <div class="flex gap-4 overflow-x-auto hide-scrollbar pb-4" id="movieTags">
+                      <button class="category-chip active" onclick="resetMoviesView()">All Years</button>
+                      <button class="category-chip" onclick="filterMovies('28')">Action</button>
+                      <button class="category-chip" onclick="filterMovies('35')">Comedy</button>
+                      <button class="category-chip" onclick="filterMovies('27')">Horror</button>
+                      <button class="category-chip" onclick="filterMovies('hi')">Hindi</button>
+                      <button class="category-chip" onclick="filterMovies('te')">Telugu</button>
+                </div>
+            </div>
+            <div id="moviesRows" class="min-h-screen"></div>
+            <div id="moviesLoader" class="text-center p-8 hidden"><div class="loader inline-block"></div></div>
+        </div>
+
+        <!-- 4. SERIES VIEW -->
+        <div id="view-series" class="page-view hidden fade-in pt-8">
+            <div class="px-6 md:px-16 mb-10">
+                <h2 class="text-4xl font-extrabold mb-3 text-white">TV Series</h2>
+                <div class="flex gap-4 overflow-x-auto hide-scrollbar pb-4" id="seriesTags">
+                      <button class="category-chip active" onclick="resetSeriesView()">All Years</button>
+                      <button class="category-chip" onclick="filterSeries('10759')">Action</button>
+                      <button class="category-chip" onclick="filterSeries('16')">Animation</button>
+                      <button class="category-chip" onclick="filterSeries('18')">Drama</button>
+                      <button class="category-chip" onclick="filterSeries('ko')">K-Drama</button>
+                </div>
+            </div>
+            <div id="seriesRows" class="min-h-screen"></div>
+            <div id="seriesLoader" class="text-center p-8 hidden"><div class="loader inline-block"></div></div>
+        </div>
+
+        <!-- 5. UPCOMING VIEW -->
+        <div id="view-upcoming" class="page-view hidden fade-in pt-8">
+            <div class="px-6 md:px-16 mb-10">
+                <h2 class="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-500 mb-8">Coming Soon</h2>
+                <div class="flex gap-4 mb-8 bg-gray-900/50 p-2 rounded-full inline-flex border border-white/10">
+                    <button class="px-6 py-2 rounded-full text-sm font-bold transition-all bg-white text-black shadow-lg" onclick="loadUpcoming('movie', this)">Movies</button>
+                    <button class="px-6 py-2 rounded-full text-sm font-bold transition-all text-gray-400 hover:text-white" onclick="loadUpcoming('tv', this)">TV Series</button>
+                </div>
+            </div>
+            <div id="upcomingGrid" class="px-6 md:px-16 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6"></div>
+        </div>
+
+        <!-- 6. SEARCH VIEW -->
+        <div id="view-search" class="page-view hidden fade-in pt-8 px-6 md:px-16">
+            <h2 class="text-3xl font-bold mb-8">Search Results</h2>
+            <div id="searchGrid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6"></div>
+        </div>
+
+        <!-- 7. SERIES DETAILS -->
+        <div id="view-details" class="page-view hidden fade-in">
+            <div class="relative w-full h-[60vh] lg:h-[70vh]">
+                <div id="detailsBackdrop" class="absolute inset-0 bg-cover bg-center"></div>
+                <div class="absolute inset-0 bg-black/40 backdrop-blur-[2px]"></div>
+                <div class="absolute inset-0 bg-gradient-to-t from-[#0a0a0a] via-[#0a0a0a]/60 to-transparent"></div>
+                
+                <div class="absolute bottom-0 left-0 w-full p-6 md:p-16 flex flex-col md:flex-row gap-10 items-end">
+                    <div class="movie-card-container hidden md:block">
+                        <img id="detailsPoster" src="" class="w-56 rounded-xl shadow-2xl border-2 border-white/10 movie-card">
+                    </div>
+                    <div class="mb-6 flex-1">
+                        <button onclick="history.back()" class="text-gray-300 hover:text-white mb-6 flex items-center gap-2 transition hover:-translate-x-1"><i class="fa-solid fa-arrow-left"></i> Back to Browse</button>
+                        <h1 id="detailsTitle" class="text-4xl md:text-6xl font-black mb-4 text-white leading-tight">Title</h1>
+                        <div class="flex flex-wrap gap-3 text-sm text-gray-300 mb-6" id="detailsMeta"></div>
+                        <p id="detailsOverview" class="text-gray-300 text-lg max-w-3xl leading-relaxed"></p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="px-6 md:px-16 py-12">
+                <h3 class="text-2xl font-bold mb-6 flex items-center gap-3"><span class="w-1 h-8 bg-blue-600 rounded-full block"></span> Seasons</h3>
+                <div id="seasonsList" class="flex gap-4 overflow-x-auto hide-scrollbar pb-8"></div>
+
+                <h3 class="text-2xl font-bold mb-6 flex items-center gap-3 mt-8"><span class="w-1 h-8 bg-green-500 rounded-full block"></span> Episodes</h3>
+                <div id="episodesGrid" class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6"></div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // --- CONFIGURATION ---
+        let API_KEY = localStorage.getItem('tmdb_api_key') || 'a806c91122f888e4c7cef80b7a080e6a';
+        const BASE_URL = 'https://api.themoviedb.org/3';
+        const IMG_BASE = 'https://image.tmdb.org/t/p/w500';
+        const IMG_ORIG = 'https://image.tmdb.org/t/p/original';
+        
+        const PLAYER_MOVIE_BASE = 'https://moviesapi.club/movie/'; 
+        const PLAYER_TV_BASE = 'https://moviesapi.club/tv/';
+        const IPTV_URL = 'https://iptv-org.github.io/iptv/countries/in.m3u';
+
+        // --- STATE MANAGEMENT ---
+        let currentPage = 'home';
+        let currentSeriesId = null;
+        let heroInterval = null;
+        let movieYear = new Date().getFullYear();
+        let seriesYear = new Date().getFullYear();
+        let isLoadingMore = false;
+        let isFiltering = false;
+        let selectedLang = 'en';
+        let pendingVideo = null; 
+        
+        // Live TV State
+        let allChannels = [];
+        let hlsPlayer = null;
+
+        // --- INITIALIZATION ---
+        window.onload = () => {
+            if (!API_KEY) document.getElementById('settingsModal').classList.remove('hidden');
+            switchPage('home'); 
+            window.addEventListener('scroll', handleInfiniteScroll);
+        };
+
+        // --- NAVIGATION ---
+        function switchPage(pageId) {
+            currentPage = pageId;
+            isFiltering = false;
+            
+            closePlayer(); // Close Main Player
+            closeLiveTvModal(); // Close Live Player
+
+            document.querySelectorAll('.page-view').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.nav-link').forEach(el => el.classList.remove('active'));
+            const navLink = document.getElementById(`nav-${pageId}`);
+            if(navLink) navLink.classList.add('active');
+
+            if (pageId === 'search') {
+                document.getElementById('view-search').classList.remove('hidden');
+                return;
+            }
+
+            const view = document.getElementById(`view-${pageId}`);
+            if (view) view.classList.remove('hidden');
+
+            if (pageId === 'home') loadHome();
+            else if (pageId === 'live') loadLiveTV();
+            else if (pageId === 'movies') resetMoviesView();
+            else if (pageId === 'series') resetSeriesView();
+            else if (pageId === 'upcoming') loadUpcoming('movie');
+            
+            window.scrollTo(0,0);
+        }
+
+        // --- INFINITE SCROLL ---
+        function handleInfiniteScroll() {
+            if (isFiltering || isLoadingMore) return;
+            const scrollPosition = window.innerHeight + window.scrollY;
+            const threshold = document.body.offsetHeight - 1000; 
+            if (scrollPosition >= threshold) {
+                if (currentPage === 'movies') loadNextMovieYear();
+                else if (currentPage === 'series') loadNextSeriesYear();
+            }
+        }
+
+        // --- LIVE TV LOGIC ---
+        async function loadLiveTV() {
+            if (allChannels.length > 0) return; 
+            document.getElementById('liveLoader').classList.remove('hidden');
+            try {
+                const response = await fetch(IPTV_URL);
+                const data = await response.text();
+                parseM3U(data);
+            } catch (error) {
+                console.error("Error loading IPTV:", error);
+                document.getElementById('liveGrid').innerHTML = '<p class="text-center col-span-full text-red-500">Failed to load live channels.</p>';
+            }
+            document.getElementById('liveLoader').classList.add('hidden');
+        }
+
+        function parseM3U(m3uData) {
+            const lines = m3uData.split('\n');
+            allChannels = [];
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].startsWith('#EXTINF')) {
+                    const info = lines[i];
+                    const url = lines[i+1];
+                    const logoMatch = info.match(/tvg-logo="([^"]*)"/);
+                    const groupMatch = info.match(/group-title="([^"]*)"/);
+                    const nameMatch = info.split(',')[1];
+                    if (url && url.startsWith('http')) {
+                        allChannels.push({
+                            name: nameMatch ? nameMatch.trim() : 'Unknown Channel',
+                            logo: logoMatch ? logoMatch[1] : null,
+                            group: groupMatch ? groupMatch[1] : 'General',
+                            url: url.trim()
+                        });
+                    }
+                }
+            }
+            allChannels = allChannels.filter(c => c.logo);
+            
+            // Render Top & All
+            renderTopChannels();
+            renderLiveChannels(allChannels);
+        }
+
+        function renderTopChannels() {
+            const topKeywords = ['aaj tak', 'india tv', 'abp', 'sony', 'zee', 'colors', 'star', '9xm', 'mtv', 'ndtv', 'republic', 'discovery', 'tlc', 'history', 'cartoon', 'pogo', 'nick'];
+            const topChannels = allChannels.filter(c => topKeywords.some(k => c.name.toLowerCase().includes(k)));
+            const uniqueTop = [...new Map(topChannels.map(item => [item['name'], item])).values()].slice(0, 15);
+
+            if(uniqueTop.length > 0) {
+                document.getElementById('topRankingSection').classList.remove('hidden');
+                const container = document.getElementById('topRankingGrid');
+                container.innerHTML = '';
+                uniqueTop.forEach(channel => {
+                    container.appendChild(createLiveCard(channel, true));
+                });
+            }
+        }
+
+        function renderLiveChannels(channels) {
+            const grid = document.getElementById('liveGrid');
+            grid.innerHTML = '';
+            if(channels.length === 0) {
+                grid.innerHTML = '<p class="col-span-full text-center text-gray-500">No channels found.</p>';
+                return;
+            }
+            channels.forEach(channel => {
+                grid.appendChild(createLiveCard(channel));
+            });
+        }
+
+        function createLiveCard(channel, isHorizontal = false) {
+            const card = document.createElement('div');
+            card.className = isHorizontal ? 'flex-none w-[180px] cursor-pointer movie-card-container' : 'movie-card-container cursor-pointer';
+            // CHANGED: Now calls the new modal function
+            card.onclick = () => playLiveChannel(channel);
+            card.innerHTML = `
+                <div class="movie-card relative rounded-xl overflow-hidden bg-white h-[120px] flex items-center justify-center border-4 border-[#1a1a1a]">
+                    <img src="${channel.logo}" class="channel-logo w-full h-full p-2" onerror="this.src='https://via.placeholder.com/200x150?text=No+Logo'">
+                    <div class="absolute bottom-0 w-full bg-black/90 p-1 text-center">
+                        <h4 class="text-xs font-bold text-white truncate">${channel.name}</h4>
+                    </div>
+                    <div class="absolute top-1 right-1 flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span></div>
+                </div>
+            `;
+            return card;
+        }
+
+        function filterLiveTV(category) {
+            document.querySelectorAll('#liveTags .category-chip').forEach(b => b.classList.remove('active'));
+            event.target.classList.add('active');
+            if (category === 'All') renderLiveChannels(allChannels);
+            else renderLiveChannels(allChannels.filter(c => c.group.toLowerCase().includes(category.toLowerCase()) || c.name.toLowerCase().includes(category.toLowerCase())));
+        }
+
+        // --- UPDATED LIVE PLAYER LOGIC (YOUTUBE STYLE) ---
+        function playLiveChannel(channel) {
+            closePlayer(); // Close other players
+
+            const modal = document.getElementById('liveTvModal');
+            const video = document.getElementById('liveMainVideo');
+            const title = document.getElementById('livePlayerTitle');
+            const loader = document.getElementById('livePlayerLoader');
+            const errorMsg = document.getElementById('livePlayerError');
+            
+            modal.classList.remove('hidden');
+            title.innerText = channel.name;
+            loader.classList.remove('hidden');
+            errorMsg.classList.add('hidden');
+
+            // Render Recommendations (Side Bar)
+            renderLiveRecommendations(channel);
+
+            if (Hls.isSupported()) {
+                if(hlsPlayer) hlsPlayer.destroy();
+                hlsPlayer = new Hls();
+                hlsPlayer.loadSource(channel.url);
+                hlsPlayer.attachMedia(video);
+                hlsPlayer.on(Hls.Events.MANIFEST_PARSED, function() {
+                    video.play().catch(e => console.log("Auto-play prevented:", e));
+                    loader.classList.add('hidden');
+                });
+                hlsPlayer.on(Hls.Events.ERROR, function (event, data) {
+                    if (data.fatal) {
+                        loader.classList.add('hidden');
+                        errorMsg.classList.remove('hidden');
+                        hlsPlayer.destroy();
+                    }
+                });
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                video.src = channel.url;
+                video.addEventListener('loadedmetadata', function() {
+                    video.play().catch(e => console.log(e));
+                    loader.classList.add('hidden');
+                });
+                video.addEventListener('error', function() {
+                    loader.classList.add('hidden');
+                    errorMsg.classList.remove('hidden');
+                });
+            }
+        }
+
+        function renderLiveRecommendations(currentChannel) {
+            const container = document.getElementById('liveRecommendations');
+            container.innerHTML = '';
+
+            // Find similar channels (same group) or just shuffle some
+            let similar = allChannels.filter(c => c.group === currentChannel.group && c.name !== currentChannel.name);
+            
+            // If not enough similar, grab random ones
+            if (similar.length < 5) {
+                const random = allChannels.filter(c => c.name !== currentChannel.name).sort(() => 0.5 - Math.random()).slice(0, 10);
+                similar = [...similar, ...random];
+            }
+            
+            // Limit to 20
+            similar = similar.slice(0, 20);
+
+            similar.forEach(channel => {
+                const item = document.createElement('div');
+                item.className = 'flex gap-3 p-2 rounded hover:bg-white/10 cursor-pointer transition group';
+                item.onclick = () => playLiveChannel(channel); // Switch channel
+                item.innerHTML = `
+                    <div class="relative w-32 h-20 flex-none bg-white rounded overflow-hidden">
+                        <img src="${channel.logo}" class="w-full h-full object-contain p-2" onerror="this.src='https://via.placeholder.com/150?text=TV'">
+                    </div>
+                    <div class="flex flex-col justify-center min-w-0">
+                        <h4 class="text-sm font-bold text-gray-200 truncate group-hover:text-blue-400 transition">${channel.name}</h4>
+                        <p class="text-xs text-gray-500">${channel.group}</p>
+                        <span class="text-[10px] bg-red-600/20 text-red-500 border border-red-600/30 px-1 rounded w-fit mt-1">LIVE</span>
+                    </div>
+                `;
+                container.appendChild(item);
+            });
+        }
+
+        function closeLiveTvModal() {
+            const modal = document.getElementById('liveTvModal');
+            const video = document.getElementById('liveMainVideo');
+            modal.classList.add('hidden');
+            video.pause();
+            video.src = "";
+            if(hlsPlayer) { hlsPlayer.destroy(); hlsPlayer = null; }
+        }
+
+        // --- PLAYBACK (Movies/Series - Main Player) ---
+        function prepareVideoPlay(id, type, title, season=1, episode=1) {
+            closeLiveTvModal();
+            pendingVideo = { id, type, title, season, episode };
+            document.getElementById('langSelectModal').classList.remove('hidden');
+            document.getElementById('langSelectModal').classList.add('flex');
+        }
+        function confirmLang(lang) { selectedLang = lang; closeLangModal(); if(pendingVideo) playVideo(pendingVideo.id, pendingVideo.type, pendingVideo.title, pendingVideo.season, pendingVideo.episode); }
+        function closeLangModal() { document.getElementById('langSelectModal').classList.add('hidden'); document.getElementById('langSelectModal').classList.remove('flex'); }
+
+        async function playVideo(id, type, title, season = 1, episode = 1) {
+            const modal = document.getElementById('playerModal');
+            const iframe = document.getElementById('videoFrame');
+            const loader = document.getElementById('iframeLoader');
+            const langTag = document.getElementById('playerLangTag');
+            
+            modal.classList.remove('hidden');
+            document.getElementById('playerTitle').innerText = title;
+            langTag.innerText = selectedLang.toUpperCase();
+            
+            loader.style.display = 'block';
+            iframe.src = "";
+            let src = type === 'movie' ? `${PLAYER_MOVIE_BASE}${id}` : `${PLAYER_TV_BASE}${id}-${season}-${episode}`;
+            setTimeout(() => { iframe.src = src; iframe.onload = () => loader.style.display = 'none'; }, 500);
+        }
+
+        function closePlayer() {
+            document.getElementById('playerModal').classList.add('hidden');
+            document.getElementById('videoFrame').src = "";
+        }
+
+        // --- Standard Logic ---
+        function resetMoviesView() { isFiltering = false; movieYear = new Date().getFullYear(); document.getElementById('moviesRows').innerHTML = ""; resetChips('movieTags'); loadNextMovieYear(); setTimeout(loadNextMovieYear, 500); }
+        async function loadNextMovieYear() { if(isLoadingMore) return; isLoadingMore = true; document.getElementById('moviesLoader').classList.remove('hidden'); const data = await fetchData(`/discover/movie?primary_release_year=${movieYear}&sort_by=popularity.desc&vote_count.gte=100`); if (data && data.results.length > 0) { createRow(`${movieYear} Movies`, data.results, document.getElementById('moviesRows'), true); movieYear--; } isLoadingMore = false; document.getElementById('moviesLoader').classList.add('hidden'); }
+        function resetSeriesView() { isFiltering = false; seriesYear = new Date().getFullYear(); document.getElementById('seriesRows').innerHTML = ""; resetChips('seriesTags'); loadNextSeriesYear(); setTimeout(loadNextSeriesYear, 500); }
+        async function loadNextSeriesYear() { if(isLoadingMore) return; isLoadingMore = true; document.getElementById('seriesLoader').classList.remove('hidden'); const data = await fetchData(`/discover/tv?first_air_date_year=${seriesYear}&sort_by=popularity.desc&vote_count.gte=50`); if (data && data.results.length > 0) { createRow(`${seriesYear} Series`, data.results, document.getElementById('seriesRows'), true); seriesYear--; } isLoadingMore = false; document.getElementById('seriesLoader').classList.add('hidden'); }
+        async function fetchData(endpoint) { try { const sep = endpoint.includes('?') ? '&' : '?'; const res = await fetch(`${BASE_URL}${endpoint}${sep}api_key=${API_KEY}`); return await res.json(); } catch(e) { console.error(e); return null; } }
+        function viewMore(id, type) { if(type === 'movie') { switchPage('movies'); setTimeout(() => filterMovies(id), 100); } else { switchPage('series'); setTimeout(() => filterSeries(id), 100); } }
+        function filterMovies(filterId) { isFiltering = true; const container = document.getElementById('moviesRows'); container.innerHTML = '<div class="text-center p-20"><div class="loader inline-block"></div></div>'; resetChips('movieTags', filterId); let endpoint = filterId.length === 2 ? `/discover/movie?with_original_language=${filterId}&sort_by=popularity.desc` : `/discover/movie?with_genres=${filterId}`; fetchData(endpoint).then(data => { container.innerHTML = ""; createRow('Results', data.results, container, true); }); }
+        function filterSeries(filterId) { isFiltering = true; const container = document.getElementById('seriesRows'); container.innerHTML = '<div class="text-center p-20"><div class="loader inline-block"></div></div>'; resetChips('seriesTags', filterId); let endpoint = filterId.length === 2 ? `/discover/tv?with_original_language=${filterId}&sort_by=popularity.desc` : `/discover/tv?with_genres=${filterId}`; fetchData(endpoint).then(data => { container.innerHTML = ""; createRow('Results', data.results, container, true); }); }
+        async function loadUpcoming(type, btn) { if(btn) { btn.parentElement.querySelectorAll('button').forEach(b => { b.classList.remove('bg-white', 'text-black'); b.classList.add('text-gray-400'); }); btn.classList.add('bg-white', 'text-black'); btn.classList.remove('text-gray-400'); } const container = document.getElementById('upcomingGrid'); container.innerHTML = '<div class="col-span-full text-center py-20"><div class="loader inline-block"></div></div>'; let endpoint = type === 'movie' ? '/movie/upcoming?region=US' : '/tv/on_the_air'; const data = await fetchData(endpoint); container.innerHTML = ""; if (data && data.results) { data.results.forEach(item => { item.media_type = type; if(item.poster_path) container.appendChild(createCard(item)); }); } }
+        async function openSeriesDetails(id) { currentSeriesId = id; document.querySelectorAll('.page-view').forEach(el => el.classList.add('hidden')); document.getElementById('view-details').classList.remove('hidden'); window.scrollTo(0,0); const data = await fetchData(`/tv/${id}`); if(!data) return; document.getElementById('detailsBackdrop').style.backgroundImage = `url('${IMG_ORIG}${data.backdrop_path}')`; document.getElementById('detailsPoster').src = `${IMG_BASE}${data.poster_path}`; document.getElementById('detailsTitle').innerText = data.name; document.getElementById('detailsOverview').innerText = data.overview; const genres = data.genres.map(g => g.name).join(', '); document.getElementById('detailsMeta').innerHTML = `<span class="bg-blue-600 px-2 py-1 rounded font-bold">${data.number_of_seasons} Seasons</span> <span class="text-blue-400">${genres}</span> <span class="text-yellow-400 font-bold"><i class="fa-solid fa-star"></i> ${data.vote_average.toFixed(1)}</span>`; const seasonsList = document.getElementById('seasonsList'); seasonsList.innerHTML = ''; data.seasons.forEach(season => { if (season.season_number > 0) { const btn = document.createElement('div'); btn.className = 'flex-none w-40 cursor-pointer group relative rounded-lg overflow-hidden border border-white/10 hover:border-blue-500 transition'; btn.innerHTML = `<img src="${IMG_BASE}${season.poster_path || data.poster_path}" class="w-full h-56 object-cover opacity-70 group-hover:opacity-100 transition"><div class="absolute bottom-0 w-full bg-black/80 p-2 text-center"><span class="font-bold text-white">Season ${season.season_number}</span></div>`; btn.onclick = () => loadEpisodes(id, season.season_number); seasonsList.appendChild(btn); } }); loadEpisodes(id, 1); }
+        async function loadEpisodes(tvId, seasonNum) { const grid = document.getElementById('episodesGrid'); grid.innerHTML = '<div class="col-span-full text-center py-10"><div class="loader inline-block"></div></div>'; const data = await fetchData(`/tv/${tvId}/season/${seasonNum}`); grid.innerHTML = ''; if(data && data.episodes) { data.episodes.forEach(ep => { const card = document.createElement('div'); card.className = 'bg-[#1a1a1a] rounded-lg overflow-hidden hover:bg-[#252525] transition cursor-pointer group border border-white/5 hover:border-blue-500/50'; const img = ep.still_path ? `${IMG_BASE}${ep.still_path}` : 'https://via.placeholder.com/300x169?text=No+Image'; card.innerHTML = `<div class="relative h-32 w-full overflow-hidden"><img src="${img}" class="w-full h-full object-cover group-hover:scale-110 transition duration-500"><div class="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition"><i class="fa-solid fa-play-circle text-3xl text-white"></i></div></div><div class="p-4"><div class="flex justify-between items-start mb-1"><h4 class="font-bold text-sm text-white truncate w-3/4">E${ep.episode_number}: ${ep.name}</h4><span class="text-xs text-gray-500">${ep.runtime || '?'}m</span></div><p class="text-xs text-gray-400 line-clamp-2">${ep.overview || 'No description available.'}</p></div>`; card.onclick = () => prepareVideoPlay(tvId, 'tv', `${data.name} S${seasonNum}:E${ep.episode_number}`, seasonNum, ep.episode_number); grid.appendChild(card); }); } }
+        
+        function initHeroCarousel(items) {
+            let index = 0;
+            const updateHero = () => {
+                const item = items[index]; if(!item) return; const content = document.getElementById('heroContent'); content.innerHTML = `<div class="flex items-center gap-4 mb-4"><div class="flex items-center gap-1 text-yellow-400 font-bold text-xl"><i class="fa-solid fa-star"></i> <span>${item.vote_average.toFixed(1)}</span></div><span class="text-gray-300 text-sm bg-white/10 border border-white/20 px-3 py-1 rounded backdrop-blur-md">${(item.release_date || item.first_air_date || '').split('-')[0]}</span><span class="text-blue-400 text-xs font-bold uppercase tracking-widest border border-blue-500/50 px-3 py-1 rounded backdrop-blur-md bg-blue-500/10">${item.media_type === 'tv' ? 'SERIES' : 'MOVIE'}</span></div><h1 class="text-5xl md:text-7xl font-black mb-6 leading-tight text-white text-glow" style="text-shadow: 2px 4px 8px rgba(0,0,0,0.8);">${item.title || item.name}</h1><p class="text-gray-200 text-lg line-clamp-3 mb-8 drop-shadow-lg max-w-2xl font-medium leading-relaxed" style="text-shadow: 1px 1px 3px rgba(0,0,0,0.8);">${item.overview}</p><div class="flex gap-5"><button onclick="${item.media_type === 'tv' ? `openSeriesDetails('${item.id}')` : `prepareVideoPlay('${item.id}', 'movie', '${item.title}')`}" class="bg-white text-black px-10 py-4 rounded-xl hover:bg-blue-50 transition transform hover:scale-105 font-bold flex items-center gap-3 shadow-lg shadow-white/20"><i class="fa-solid fa-play text-xl"></i> <span class="text-lg">Play Now</span></button><button onclick="${item.media_type === 'tv' ? `openSeriesDetails('${item.id}')` : `prepareVideoPlay('${item.id}', 'movie', '${item.title}')`}" class="bg-gray-800/60 text-white border border-gray-600 px-8 py-4 rounded-xl hover:bg-gray-800/80 transition transform hover:scale-105 font-bold flex items-center gap-3 backdrop-blur-md"><i class="fa-solid fa-circle-info text-xl"></i> <span class="text-lg">Details</span></button></div>`; document.getElementById('heroSection').style.backgroundImage = `url('${IMG_ORIG}${item.backdrop_path}')`; index = (index + 1) % items.length;
+            }; updateHero(); if(heroInterval) clearInterval(heroInterval); heroInterval = setInterval(updateHero, 5000);
+        }
+        function resetChips(containerId, activeId=null) { document.querySelectorAll(`#${containerId} .category-chip`).forEach(btn => { btn.classList.remove('active'); if(activeId && btn.onclick.toString().includes(activeId)) btn.classList.add('active'); if(!activeId && btn.textContent === 'All Years') btn.classList.add('active'); }); }
+        function debounce(func, wait) { let timeout; return function(...args) { clearTimeout(timeout); timeout = setTimeout(() => func.apply(this, args), wait); }; }
+        document.getElementById('searchInput').addEventListener('input', debounce(handleSearch, 500));
+        async function handleSearch(e) { const query = e.target.value; if(!query) { switchPage('home'); return; } switchPage('search'); const grid = document.getElementById('searchGrid'); grid.innerHTML = '<div class="loader"></div>'; const data = await fetchData(`/search/multi?query=${query}`); grid.innerHTML = ''; if(data.results) { data.results.forEach(item => { if((item.media_type === 'movie' || item.media_type === 'tv') && item.poster_path) { grid.appendChild(createCard(item)); } }); } }
+        function saveApiKey() { const key = document.getElementById('apiKeyInput').value; if(key) { localStorage.setItem('tmdb_api_key', key); API_KEY = key; document.getElementById('settingsModal').classList.add('hidden'); location.reload(); } }
+        function openSettings() { document.getElementById('settingsModal').classList.remove('hidden'); }
+        async function loadHome() {
+            const container = document.getElementById('homeRows');
+            if(container.innerHTML !== "") return; 
+            const trending = await fetchData('/trending/all/week');
+            if(trending && trending.results.length > 0) {
+                initHeroCarousel(trending.results.slice(0,10));
+                createRow('Trending Now', trending.results, container, false, {id:'popular', type:'movie'});
+            }
+            const movieGenres = await fetchData('/genre/movie/list');
+            const nowPlaying = await fetchData('/movie/now_playing');
+            createRow('In Theaters', nowPlaying.results, container, false, {id:'now_playing', type:'movie'});
+            if(movieGenres && movieGenres.genres) {
+                for (const genre of movieGenres.genres) {
+                    fetchData(`/discover/movie?with_genres=${genre.id}`)
+                        .then(data => { if(data && data.results.length > 0) createRow(`${genre.name} Movies`, data.results, container, false, {id: genre.id, type: 'movie'}); });
+                }
+            }
+            const tvTrend = await fetchData('/tv/popular');
+            createRow('Popular Series', tvTrend.results, container, false, {id:'popular', type:'tv'});
+        }
+        function createRow(title, data, container, isGrid = false, viewMoreData = null) {
+            if(!data || data.length === 0) return;
+            const section = document.createElement('div');
+            section.className = 'mb-16 fade-in';
+            let headerHTML = viewMoreData 
+                ? `<div class="flex justify-between items-center mb-6 px-6 md:px-16"><h3 class="text-2xl font-bold border-l-4 border-blue-600 pl-4 text-white">${title}</h3><button onclick="viewMore('${viewMoreData.id}', '${viewMoreData.type}')" class="text-gray-400 hover:text-white text-sm font-bold uppercase tracking-wider transition flex items-center gap-2 group bg-white/5 px-4 py-2 rounded-full hover:bg-blue-600 border border-white/10 hover:border-blue-600">View More <i class="fa-solid fa-arrow-right group-hover:translate-x-1 transition"></i></button></div>`
+                : `<h3 class="text-2xl font-bold mb-6 border-l-4 border-blue-600 pl-4 px-6 md:px-16 text-white">${title}</h3>`;
+            
+            if(isGrid) {
+                section.innerHTML = `${headerHTML}<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6 px-6 md:px-16"></div>`;
+                const grid = section.querySelector('div:last-child');
+                data.forEach(item => grid.appendChild(createCard(item)));
+            } else {
+                section.innerHTML = `${headerHTML}<div class="flex gap-5 overflow-x-auto hide-scrollbar pb-8 px-6 md:px-16 pt-2"></div>`;
+                const slider = section.querySelector('div:last-child');
+                data.forEach(item => slider.appendChild(createCard(item)));
+            }
+            container.appendChild(section);
+        }
+        function createCard(item) {
+            const cardContainer = document.createElement('div');
+            const type = item.media_type || (item.first_air_date ? 'tv' : 'movie');
+            const title = item.title || item.name;
+            const date = item.release_date || item.first_air_date || 'N/A';
+            const year = date.split('-')[0];
+            const rating = item.vote_average ? item.vote_average.toFixed(1) : 'NR';
+            const lang = item.original_language ? item.original_language.toUpperCase() : '';
+            cardContainer.className = 'flex-none w-[160px] md:w-[220px] movie-card-container cursor-pointer';
+            cardContainer.innerHTML = `<div class="movie-card relative rounded-xl overflow-hidden bg-[#1a1a1a] h-[240px] md:h-[330px]"><img src="${item.poster_path ? IMG_BASE + item.poster_path : 'https://via.placeholder.com/200x300'}" class="w-full h-full object-cover"><div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-90"></div><div class="absolute top-2 right-2 bg-black/60 backdrop-blur-md px-2 py-1 rounded text-xs font-bold text-yellow-400 border border-white/10 flex items-center gap-1"><i class="fa-solid fa-star text-[10px]"></i> ${rating}</div><div class="absolute top-2 left-2 bg-blue-600/80 backdrop-blur-md px-2 py-1 rounded text-[10px] font-bold text-white border border-white/10 uppercase">${lang}</div><div class="absolute bottom-0 left-0 w-full p-3"><h4 class="text-sm font-bold text-white truncate mb-1 leading-tight">${title}</h4><div class="flex justify-between items-center text-xs text-gray-400"><span>${year}</span><span class="uppercase border border-gray-600 px-1 rounded text-[10px]">${type}</span></div></div><div class="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition duration-300 bg-black/40 backdrop-blur-[1px]"><div class="bg-white/20 p-3 rounded-full border border-white/50 backdrop-blur-md"><i class="fa-solid fa-play text-white text-xl ml-1"></i></div></div></div>`;
+            cardContainer.onclick = () => { if(type === 'tv') openSeriesDetails(item.id); else prepareVideoPlay(item.id, 'movie', title); };
+            return cardContainer;
+        }
+    </script>
+</body>
+</html>
